@@ -3,10 +3,35 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Bosque Oscuro — Con Ríos y Shock</title>
+  <title>Bosque Oscuro: Siren Head (Con Música)</title>
   <style>
-    html,body { margin:0; height:100%; overflow:hidden; background:#000; font-family: Arial, sans-serif; }
+    html,body { margin:0; height:100%; overflow:hidden; background:#000; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
     #gameCanvas { width:100%; height:100%; display:block; touch-action:none; }
+    
+    /* --- Pantalla de Carga --- */
+    #loading-screen {
+      position: absolute; inset: 0; background: #000; z-index: 100;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      color: #fff; transition: opacity 0.5s ease-out;
+    }
+    #loading-screen.fade-out { opacity: 0; pointer-events: none; }
+    #loading-screen h1 {
+      font-size: clamp(2.5rem, 8vw, 4.5rem); margin-bottom: 2rem; letter-spacing: 2px;
+      text-shadow: 0 0 15px rgba(255, 80, 80, 0.4); font-weight: 600;
+    }
+    #loading-progress-container { width: 80%; max-width: 400px; text-align: center; }
+    #loading-text { margin-bottom: 0.5rem; font-size: 0.9rem; color: #ccc; }
+    #loading-bar { width: 100%; height: 4px; background: rgba(255, 255, 255, 0.1); }
+    #loading-bar-fill { width: 0%; height: 100%; background: #fff; transition: width 0.3s ease-out; }
+    #start-button {
+      display: none; margin-top: 2rem; padding: 12px 24px; font-size: 1.1rem; color: #fff;
+      background: transparent; border: 2px solid rgba(255, 255, 255, 0.5);
+      border-radius: 4px; cursor: pointer; transition: background 0.2s, border-color 0.2s;
+    }
+    #start-button:hover { background: rgba(255, 255, 255, 0.1); border-color: #fff; }
+
+    /* --- UI del Juego (inicialmente oculta) --- */
+    .game-ui { display: none; }
     .ui { position: absolute; left: 10px; top: 10px; color: #fff; z-index: 40; text-shadow: 0 0 8px rgba(0,0,0,0.9); }
     #battery { width: 200px; height: 18px; background: rgba(255,255,255,0.12); border-radius: 9px; overflow:hidden; border: 1px solid rgba(255,255,255,0.08); }
     #batteryFill { height:100%; width:100%; background: linear-gradient(90deg,#ffd24a,#ff7a4a); transition: width 0.2s linear; }
@@ -18,576 +43,683 @@
     .look-note { position:absolute; right:12px; bottom:12px; z-index:30; color:#fff; font-size:12px; opacity:0.8; }
     #darkOverlay { position:absolute; inset:0; background: radial-gradient(circle at center, rgba(0,0,0,0) 18%, rgba(0,0,0,0.85) 60%); pointer-events:none; z-index:35; opacity:0; transition: opacity 0.5s ease; }
     #tip { position:absolute; left:50%; transform:translateX(-50%); bottom:140px; color:#fff; z-index:30; font-size:13px; opacity:0.85;}
-    /* Skull shock overlay */
-    #shockOverlay {
-      position: absolute; inset: 0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:50;
-      transition: opacity 0.6s ease;
-      opacity:0;
-    }
-    #skull {
-      font-size: 10vw; /* base */
-      filter: drop-shadow(0 6px 20px rgba(0,0,0,0.9));
-      transform: scale(0.02);
-      transition: transform 0.6s cubic-bezier(.2,.9,.3,1), opacity 0.3s ease;
-      opacity:0;
-      will-change: transform, opacity;
-    }
-    /* When shock active */
+    #shockOverlay { position: absolute; inset: 0; display:flex; align-items:center; justify-content:center; pointer-events:none; z-index:50; transition: opacity 0.6s ease; opacity:0; }
+    #skull { font-size: 10vw; filter: drop-shadow(0 6px 20px rgba(0,0,0,0.9)); transform: scale(0.02); transition: transform 0.6s cubic-bezier(.2,.9,.3,1), opacity 0.3s ease; opacity:0; will-change: transform, opacity; }
     .shock-active #gameCanvas { filter: grayscale(1) contrast(0.9) brightness(0.9); }
     .shock-active #skull { opacity:1; transform: scale(1.8); font-size: 28vw; }
+
+    /* overlay rojo para intensidad */
+    #redTint { position:absolute; inset:0; pointer-events:none; z-index:90; background: rgba(0,0,0,0); opacity:0; transition: opacity 0.6s; }
+
+    @media (max-width:700px){
+      #loading-progress-container { width:92%; padding:14px; }
+    }
   </style>
 </head>
 <body>
+
+  <div id="loading-screen">
+    <h1>Bosque Oscuro</h1>
+    <div id="loading-progress-container">
+      <div id="loading-text">Cargando recursos...</div>
+      <div id="loading-bar"><div id="loading-bar-fill"></div></div>
+    </div>
+    <button id="start-button">Comenzar Juego</button>
+  </div>
+
   <canvas id="gameCanvas"></canvas>
 
-  <div class="ui">
+  <!-- VIDEOS/SONIDOS desde Dropbox (ocultos) -->
+  <!-- Nota: convertí dl=0 -> dl=1 para reproducción directa -->
+  <video id="introMedia" preload="auto" playsinline style="display:none" crossorigin="anonymous"
+    src="https://www.dropbox.com/scl/fi/sok8e9xmaju5u2rs4fa33/copy_6FB26451-E13C-4C9B-985B-0FE7456B0AEB.mov?dl=1"></video>
+
+  <video id="meteorMedia" preload="auto" playsinline style="display:none" crossorigin="anonymous"
+    src="https://www.dropbox.com/scl/fi/n0dgxygzqdwlezdrt9nvj/copy_8E556044-D665-4CF5-89BA-2C9BDBA8CF75.mov?dl=1"></video>
+
+  <div id="redTint"></div>
+
+  <div class="ui game-ui">
     <div id="battery"><div id="batteryFill"></div></div>
     <div id="btnFlash">Linterna: ON (F)</div>
     <div id="message">Batería: <span id="batteryNights">30.0</span> noches · <span id="batteryText">3600</span>s</div>
   </div>
-
-  <div id="tip">Usa joystick (izq) para moverte y arrastra a la derecha para mirar</div>
-
-  <div class="joystick" id="joystick">
-    <div class="joy-base" id="joyBase">
-      <div class="joy-knob" id="joyKnob"></div>
-    </div>
+  <div id="tip" class="game-ui">Usa joystick (izq) para moverte y arrastra a la derecha para mirar</div>
+  <div class="joystick game-ui" id="joystick">
+    <div class="joy-base"><div class="joy-knob" id="joyKnob"></div></div>
   </div>
-
-  <div class="look-note">Arrastra aquí para mirar</div>
+  <div class="look-note game-ui">Arrastra aquí para mirar</div>
   <div id="darkOverlay"></div>
+  <div id="shockOverlay"><div id="skull">💀</div></div>
 
-  <!-- Shock overlay (calavera) -->
-  <div id="shockOverlay">
-    <div id="skull">💀</div>
-  </div>
-
-  <!-- Three.js -->
-  <script src="https://unpkg.com/three@0.153.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.153.0/build/three.min.js"></script>
 
   <script>
-  // ---------- Config ----------
-  const nightDuration = 120.0; // segundos que dura UNA noche
-  const batteryLife = nightDuration * 30.0; // ahora dura 30 noches
-  const treesCount = 180;
-  const forestRadius = 120;
-  const playerHeight = 1.6;
-  const moveSpeed = 2.8; // m/s
-  const runSpeed = 4.6;
-  // Ríos
-  const riversCount = 2; // cuántos ríos generar
-  const riverSegmentLength = 8; // distancia entre muestras
-  // Shock (efecto de calavera)
-  const shockIntervalMs = 30000; // cada 30s
-  const shockDurationMs = 10000; // dura 10s
-  // ----------------------------
+  // ---------------------------
+  // TODO: Código completo integrado
+  // ---------------------------
 
-  // Canvas & Renderer
+  // Estados del juego
+  let gameState = 'LOADING'; // LOADING, INTRO, FINALE, PLAYING
+
+  // Configuracion
+  const nightDuration = 120.0, batteryLife = nightDuration * 30.0, treesCount = 120;
+  const forestRadius = 120, playerHeight = 1.6, moveSpeed = 2.8, runSpeed = 4.6;
+  const riversCount = 2, riverSegmentLength = 8, shockIntervalMs = 30000, shockDurationMs = 10000;
+  const introDuration = 14.0;
+
+  // DOM
+  const loadingScreen = document.getElementById('loading-screen');
+  const startButton = document.getElementById('start-button');
+  const gameUiElements = document.querySelectorAll('.game-ui');
+  const loadingBarFill = document.getElementById('loading-bar-fill');
+  const redTint = document.getElementById('redTint');
+
+  // Vídeos/audio
+  const introMedia = document.getElementById('introMedia');
+  const meteorMedia = document.getElementById('meteorMedia');
+
+  // Asegurar volúmenes y estados iniciales
+  try { introMedia.volume = 1.0; } catch(e){}
+  try { meteorMedia.volume = 0.0; meteorMedia.loop = false; } catch(e){}
+
+  // Helper: safePlay (manejo de autoplay)
+  async function safePlay(el){
+    if (!el) return;
+    try { await el.play(); } catch (err) { console.warn('safePlay:error', err); }
+  }
+
+  // Helper: crossfade entre medias (de -> a)
+  function crossfade(fromEl, toEl, duration = 900){
+    return new Promise(resolve=>{
+      const start = performance.now();
+      // intentar iniciar toEl
+      safePlay(toEl).catch(()=>{});
+      function frame(now){
+        const t = Math.min(1, (now - start) / duration);
+        // easing
+        const e = t<0.5 ? 2*t*t : -1 + (4-2*t)*t;
+        if (fromEl) fromEl.volume = Math.max(0, 1 - e);
+        if (toEl) toEl.volume = Math.min(1, e);
+        if (t < 1) requestAnimationFrame(frame);
+        else {
+          try { if (fromEl) fromEl.pause(); } catch(e){}
+          resolve();
+        }
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+
+  // Renderer y canvas
   const canvas = document.getElementById('gameCanvas');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
   renderer.setSize(window.innerWidth, window.innerHeight);
-  renderer.shadowMap.enabled = false;
+  renderer.shadowMap.enabled = true;
 
+  // Escena y cámaras
   const scene = new THREE.Scene();
   scene.fog = new THREE.FogExp2(0x000012, 0.012);
 
-  // Camera / Player
+  // Cámara del jugador (original) y cámaras extra para cinemática
   const camera = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 1200);
-  camera.position.set(0, playerHeight, 0);
+  const droneCam = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 2000);
+  const planetCam = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 3000);
+  const rocketCam = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 3000);
+  const groundCam = new THREE.PerspectiveCamera(70, window.innerWidth/window.innerHeight, 0.1, 3000);
 
-  // Lights
+  let activeCamera = droneCam;
+
+  // Luces y objetos base (preservados)
   const hemi = new THREE.HemisphereLight(0x40405a, 0x060616, 0.6);
   scene.add(hemi);
-
-  // Moon (red)
   const moonGeo = new THREE.SphereGeometry(8, 32, 32);
   const moonMat = new THREE.MeshStandardMaterial({ color: 0x330000, emissive: 0x8b0000, emissiveIntensity: 1.8, roughness: 0.8 });
   const moonMesh = new THREE.Mesh(moonGeo, moonMat);
   moonMesh.position.set(-70, 80, -120);
   scene.add(moonMesh);
-
-  // subtle directional light from moon (reddish)
   const moonLight = new THREE.DirectionalLight(0xffb0b0, 0.12);
   moonLight.position.copy(moonMesh.position);
+  moonLight.castShadow = true;
   scene.add(moonLight);
 
-  // Stars
-  (function makeStars(count=900){
-    const positions = new Float32Array(count * 3);
-    const radius = 600;
-    for (let i=0;i<count;i++){
-      const theta = Math.random() * Math.PI * 2;
-      const phi = Math.acos((Math.random()*2)-1);
-      const r = radius * (0.9 + Math.random()*0.2);
-      const x = Math.sin(phi) * Math.cos(theta) * r;
-      const y = Math.sin(phi) * Math.sin(theta) * r;
-      const z = Math.cos(phi) * r;
-      positions[i*3+0] = x;
-      positions[i*3+1] = y + 80;
-      positions[i*3+2] = z;
-    }
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.9, sizeAttenuation: true, depthWrite: false });
-    const pts = new THREE.Points(geom, mat);
-    scene.add(pts);
-  })();
+  // Estrellas
+  (function makeStars(count=900){ const positions = new Float32Array(count * 3);const radius = 600;for (let i=0;i<count;i++){const theta = Math.random() * Math.PI * 2;const phi = Math.acos((Math.random()*2)-1);const r = radius * (0.9 + Math.random()*0.2);const x = Math.sin(phi) * Math.cos(theta) * r;const y = Math.sin(phi) * Math.sin(theta) * r;const z = Math.cos(phi) * r;positions[i*3+0] = x;positions[i*3+1] = y + 80;positions[i*3+2] = z;}const geom = new THREE.BufferGeometry();geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));const mat = new THREE.PointsMaterial({ color: 0xffffff, size: 0.9, sizeAttenuation: true, depthWrite: false });const pts = new THREE.Points(geom, mat);scene.add(pts);})();
 
-  // Ground
-  const groundGeo = new THREE.PlaneGeometry(2000,2000,10,10);
-  const groundMat = new THREE.MeshStandardMaterial({ color: 0x07100a, roughness:1 });
+  // Terreno (shader preserved)
+  const groundGeo = new THREE.PlaneGeometry(2000, 2000, 150, 150);
+  const groundMat = new THREE.ShaderMaterial({
+    uniforms:{moonLightPos:{value:moonLight.position}},
+    vertexShader:`varying vec3 vPosition;varying vec3 vNormal;float random(vec2 st){return fract(sin(dot(st.xy,vec2(12.9898,78.233)))*43758.5453123);}float noise(vec2 st){vec2 i=floor(st);vec2 f=fract(st);vec2 u=f*f*(3.0-2.0*f);return mix(random(i),random(i+vec2(1.0,0.0)),u.x)+(random(i+vec2(0.0,1.0))-random(i))*u.y*(1.0-u.x)+(random(i+vec2(1.0,1.0))-random(i+vec2(1.0,0.0)))*u.y*u.x;}void main(){vPosition=position;vNormal=normal;float displacement=noise(position.xz*0.1)*0.5+noise(position.xz*0.4)*0.15;vec3 newPosition=position+normal*displacement;gl_Position=projectionMatrix*modelViewMatrix*vec4(newPosition,1.0);}`,
+    fragmentShader:`varying vec3 vPosition;varying vec3 vNormal;uniform vec3 moonLightPos;float random(vec2 st){return fract(sin(dot(st.xy,vec2(12.9898,78.233)))*43758.5453123);}float noise(vec2 st){vec2 i=floor(st);vec2 f=fract(st);vec2 u=f*f*(3.0-2.0*f);return mix(random(i),random(i+vec2(1.0,0.0)),u.x)+(random(i+vec2(0.0,1.0))-random(i))*u.y*(1.0-u.x)+(random(i+vec2(1.0,1.0))-random(i+vec2(1.0,0.0)))*u.y*u.x;}float fbm(vec2 st){float value=0.0;float amplitude=0.5;for(int i=0;i<4;i++){value+=amplitude*noise(st);st*=2.0;amplitude*=0.5;}return value;}void main(){vec3 dirtColor1=vec3(0.25,0.18,0.15);vec3 dirtColor2=vec3(0.35,0.25,0.20);vec3 mossColor=vec3(0.18,0.22,0.15);vec2 worldPos=vPosition.xz;float n1=fbm(worldPos*0.05);float n2=fbm(worldPos*0.35);vec3 color=mix(dirtColor1,dirtColor2,n1);color=mix(color,mossColor,smoothstep(0.55,0.75,n2)*0.6);vec3 lightDir=normalize(moonLightPos-vPosition);float diff=max(dot(vNormal,lightDir),0.2);vec3 finalColor=color*diff;gl_FragColor=vec4(finalColor,1.0);}`
+  });
   const ground = new THREE.Mesh(groundGeo, groundMat);
-  ground.rotation.x = -Math.PI/2;
-  scene.add(ground);
+  ground.rotation.x = -Math.PI/2; ground.receiveShadow = true; scene.add(ground);
 
-  // Trees
+  // Árboles, rocas y ríos (preservados)
   const treeGroup = new THREE.Group();
   scene.add(treeGroup);
   const treeCollisionSpheres = [];
 
-  function makeTree() {
-    const trunkGeo = new THREE.CylinderGeometry(0.12, 0.16, 2.0, 6);
-    const trunkMat = new THREE.MeshStandardMaterial({ color:0x4a2b1b });
-    const trunk = new THREE.Mesh(trunkGeo, trunkMat);
-    trunk.position.y = 1.0;
-
-    const leavesMat = new THREE.MeshStandardMaterial({ color: 0x0c2a10, flatShading:true });
-    const leaves1 = new THREE.ConeGeometry(1.2, 1.6, 8);
-    const l1 = new THREE.Mesh(leaves1, leavesMat); l1.position.y = 2.0;
-    const leaves2 = new THREE.ConeGeometry(0.9, 1.2, 8);
-    const l2 = new THREE.Mesh(leaves2, leavesMat); l2.position.y = 2.9;
-
-    const tree = new THREE.Group();
-    tree.add(trunk, l1, l2);
-    return tree;
-  }
+  function makeTree() { /* (código idéntico al original para crear árbol) */
+    const tree = new THREE.Group(); const trunkColor = new THREE.Color(0x5a3a22).lerp(new THREE.Color(0x3a2211), Math.random() * 0.4); const leavesColor = new THREE.Color(0x1a3a1a).lerp(new THREE.Color(0x2a5a2a), Math.random() * 0.6); const trunkMat = new THREE.MeshStandardMaterial({ color: trunkColor, roughness: 0.9, metalness: 0.1 }); const leavesMat = new THREE.MeshStandardMaterial({ color: leavesColor, roughness: 0.8, flatShading: true }); const trunkHeight = 6 + Math.random() * 5; const trunkRadius = 0.2 + Math.random() * 0.2; const trunkGeo = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 8); const pos = trunkGeo.attributes.position; for (let i = 0; i < pos.count; i++) { const y = pos.getY(i); const factor = (y + trunkHeight/2) / trunkHeight;  const radiusScale = 1.0 - factor * 0.3; let x = pos.getX(i) * radiusScale; let z = pos.getZ(i) * radiusScale; const bend = Math.sin(factor * Math.PI) * 0.5; x += bend; pos.setXYZ(i, x, y, z); } trunkGeo.computeVertexNormals(); const trunk = new THREE.Mesh(trunkGeo, trunkMat); trunk.position.y = trunkHeight / 2; tree.add(trunk); const branchesCount = 4 + Math.floor(Math.random() * 4); for (let i = 0; i < branchesCount; i++) { const branchStartY = trunkHeight * (0.4 + Math.random() * 0.5); const branchAngleY = Math.random() * Math.PI * 2; const branchLength = 2.5 + Math.random() * 2; const branchRadius = trunkRadius * (0.3 + Math.random() * 0.3); const branchGeo = new THREE.CylinderGeometry(branchRadius * 0.5, branchRadius, branchLength, 6); branchGeo.translate(0, branchLength / 2, 0); const branch = new THREE.Mesh(branchGeo, trunkMat); branch.position.set(0, branchStartY, 0); branch.rotation.z = (Math.PI / 2) - (0.4 + Math.random() * 0.5); branch.rotation.y = branchAngleY; tree.add(branch); const leafClump = new THREE.Group(); for(let j=0; j < 3 + Math.floor(Math.random() * 4); j++) { const leafGeo = new THREE.IcosahedronGeometry(1.0 + Math.random() * 0.8, 0); const leaf = new THREE.Mesh(leafGeo, leavesMat); leaf.position.set((Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5, (Math.random() - 0.5) * 1.5); leaf.rotation.set(Math.random()*Math.PI, Math.random()*Math.PI, Math.random()*Math.PI); leafClump.add(leaf); } const endOfBranch = new THREE.Vector3(0, branchLength, 0); endOfBranch.applyEuler(branch.rotation); leafClump.position.copy(branch.position).add(endOfBranch); tree.add(leafClump); } for(let k=0; k < 4 + Math.floor(Math.random() * 5); k++) { const leafGeo = new THREE.IcosahedronGeometry(1.5 + Math.random(), 0); const leaf = new THREE.Mesh(leafGeo, leavesMat); leaf.position.set((Math.random() - 0.5) * 2.5, trunkHeight + (Math.random() - 0.2) * 2.0, (Math.random() - 0.5) * 2.5); tree.add(leaf); } return tree; }
 
   for (let i=0;i<treesCount;i++){
-    const angle = Math.random()*Math.PI*2;
-    const r = Math.random()*forestRadius;
-    const x = Math.cos(angle)*r;
-    const z = Math.sin(angle)*r;
-    if (Math.hypot(x,z) < 6) continue;
-    const t = makeTree();
-    t.position.set(x, 0, z);
-    const s = 0.8 + Math.random()*0.9;
-    t.scale.setScalar(s);
-    t.rotation.y = Math.random()*Math.PI*2;
-    treeGroup.add(t);
-    const colRad = 0.9 * s;
-    treeCollisionSpheres.push({ pos: new THREE.Vector3(x, 1.0, z), r: colRad });
+    const angle = Math.random()*Math.PI*2; const r = 10 + Math.random()* (forestRadius - 10); const x = Math.cos(angle)*r; const z = Math.sin(angle)*r; if (Math.hypot(x,z) < 6) continue; const t = makeTree(); t.position.set(x, 0, z); const s = 0.8 + Math.random()*0.9; t.scale.setScalar(s); t.rotation.y = Math.random()*Math.PI*2; treeGroup.add(t); const colRad = 1.2 * s; treeCollisionSpheres.push({ pos: new THREE.Vector3(x, 1.0, z), r: colRad }); }
+
+  for (let i=0;i<40;i++){ const rockGeo = new THREE.IcosahedronGeometry(1, 0); const pos = rockGeo.attributes.position; for(let j=0; j<pos.count; j++){ pos.setXYZ(j, pos.getX(j) + (Math.random()-0.5)*0.2, pos.getY(j) + (Math.random()-0.5)*0.2, pos.getZ(j) + (Math.random()-0.5)*0.2); } const b = new THREE.Mesh(rockGeo, new THREE.MeshStandardMaterial({color:0x232323, flatShading:true})); const ang = Math.random()*Math.PI*2, rr = 6 + Math.random()*forestRadius; b.position.set(Math.cos(ang)*rr, 0.1, Math.sin(ang)*rr); b.rotation.y = Math.random()*Math.PI; const sc = 0.2 + Math.random()*0.4; b.scale.set(sc,sc,sc); scene.add(b); }
+
+  for (let r=0;r<riversCount;r++){ function randomRiverPath(centerX, centerZ, lengthSegments=12, bend=12) { const pts = []; let x = centerX, z = centerZ; let angle = Math.random()*Math.PI*2; for (let i=0;i<lengthSegments;i++){ x += Math.cos(angle) * (riverSegmentLength * (0.7 + Math.random()*0.6)); z += Math.sin(angle) * (riverSegmentLength * (0.7 + Math.random()*0.6)); angle += (Math.random()-0.5) * (bend*0.02); pts.push(new THREE.Vector3(x, 0.05, z)); } return pts; } function buildRiverMesh(pathPoints, width) { const segments = pathPoints.length;const pos = new Float32Array((segments*2) * 3);const uvs = new Float32Array((segments*2) * 2);const indices = [];for (let i=0;i<segments;i++){const p = pathPoints[i];const next = pathPoints[Math.min(i+1, segments-1)];const prev = pathPoints[Math.max(i-1, 0)];const t = new THREE.Vector3().subVectors(next, prev).normalize();const left = new THREE.Vector3(-t.z, 0, t.x).normalize();const half = width * (0.5 + (Math.sin(i*0.5)*0.12));const leftPos = new THREE.Vector3().copy(p).addScaledVector(left, half);const rightPos = new THREE.Vector3().copy(p).addScaledVector(left, -half);pos[(i*2+0)*3+0] = leftPos.x; pos[(i*2+0)*3+1] = leftPos.y; pos[(i*2+0)*3+2] = leftPos.z;pos[(i*2+1)*3+0] = rightPos.x; pos[(i*2+1)*3+1] = rightPos.y; pos[(i*2+1)*3+2] = rightPos.z;const v = i / (segments-1);uvs[(i*2+0)*2+0] = 0; uvs[(i*2+0)*2+1] = v * 6;uvs[(i*2+1)*2+0] = 1; uvs[(i*2+1)*2+1] = v * 6;if (i < segments-1) {const a = i*2, b = i*2+1, c = (i+1)*2, d = (i+1)*2+1;indices.push(a,b,c); indices.push(b,d,c);}}const geom = new THREE.BufferGeometry();geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));geom.setIndex(indices);geom.computeVertexNormals();const mat = new THREE.ShaderMaterial({uniforms: {time: { value: 0.0 },baseColor: { value: new THREE.Color(0x223b5a) },highlight: { value: new THREE.Color(0x7fb3ff) },opacity: { value: 0.85 }},vertexShader: `varying vec2 vUv;varying vec3 vPos;void main(){vUv = uv;vPos = position;gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);}`,fragmentShader: `uniform float time;uniform vec3 baseColor;uniform vec3 highlight;uniform float opacity;varying vec2 vUv;varying vec3 vPos;void main(){float wave = sin(vUv.y * 12.0 + time * 2.0) * 0.08;float stripe = smoothstep(0.0, 0.6, sin(vUv.x * 10.0 + time * 3.0) * 0.5 + 0.5);vec3 col = mix(baseColor, highlight, 0.35 * stripe + 0.25*wave);float edge = smoothstep(0.0, 0.12, abs(vUv.x-0.5));col *= (1.0 - 0.25*edge);gl_FragColor = vec4(col, opacity);}`,transparent: true,depthWrite: false,side: THREE.DoubleSide});const mesh = new THREE.Mesh(geom, mat);mesh.renderOrder = 1;return mesh;} const startX = (Math.random()-0.5) * 40; const startZ = (Math.random()-0.5) * 40; const path = randomRiverPath(startX, startZ, 14 + Math.floor(Math.random()*8)); const width = 3 + Math.random()*4; const riverMesh = buildRiverMesh(path, width); scene.add(riverMesh); if (!window._rivers) window._rivers = []; window._rivers.push(riverMesh); }
+
+  // SirenHead (preservado)
+  function createSirenHead() {
+    const group = new THREE.Group();
+    const material = new THREE.MeshStandardMaterial({ color: 0x1a1a1a, roughness: 0.8 });
+    const bodyGeo = new THREE.CylinderGeometry(0.1, 0.2, 18, 6);
+    const body = new THREE.Mesh(bodyGeo, material);
+    body.position.y = 9;
+    const armGeo = new THREE.CylinderGeometry(0.08, 0.08, 12, 6);
+    const leftArm = new THREE.Mesh(armGeo, material);
+    leftArm.position.set(-0.5, 15, 0);
+    leftArm.rotation.z = Math.PI / 4;
+    const rightArm = leftArm.clone();
+    rightArm.position.x = 0.5;
+    rightArm.rotation.z = -Math.PI / 4;
+    const legGeo = new THREE.CylinderGeometry(0.15, 0.1, 10, 6);
+    const leftLeg = new THREE.Mesh(legGeo, material);
+    leftLeg.position.set(-0.3, -5, 0);
+    const rightLeg = leftLeg.clone();
+    rightLeg.position.x = 0.3;
+    const poleGeo = new THREE.CylinderGeometry(0.05, 0.05, 1.5, 8);
+    const pole = new THREE.Mesh(poleGeo, material);
+    pole.position.y = 18.5;
+    const sirenGeo = new THREE.ConeGeometry(0.4, 0.8, 8);
+    const siren1 = new THREE.Mesh(sirenGeo, material);
+    siren1.position.set(0, 19.5, 0.3);
+    siren1.rotation.x = Math.PI / 2.5;
+    const siren2 = siren1.clone();
+    siren2.position.z = -0.3;
+    siren2.rotation.x = -Math.PI / 2.5;
+    group.add(body, leftArm, rightArm, leftLeg, rightLeg, pole, siren1, siren2);
+    return group;
   }
+  const sirenHead = createSirenHead();
+  sirenHead.position.set(-45, 5, -110);
+  scene.add(sirenHead);
+  sirenHead.visible = false; // oculto durante intro/cinemática por defecto
 
-  // Some rocks
-  for (let i=0;i<40;i++){
-    const b = new THREE.Mesh(new THREE.BoxGeometry(0.5,0.3,0.5), new THREE.MeshStandardMaterial({color:0x232323}));
-    const ang = Math.random()*Math.PI*2, rr = 6 + Math.random()*forestRadius;
-    b.position.set(Math.cos(ang)*rr, 0.15, Math.sin(ang)*rr);
-    b.rotation.y = Math.random()*Math.PI;
-    const sc = 0.5 + Math.random()*1.1; b.scale.set(sc,sc,sc);
-    scene.add(b);
-  }
-
-  // ---------- RÍOS ----------
-  // Helper: sample a curved path as centro del río
-  function randomRiverPath(centerX, centerZ, lengthSegments=12, bend=12) {
-    const pts = [];
-    let x = centerX, z = centerZ;
-    let angle = Math.random()*Math.PI*2;
-    for (let i=0;i<lengthSegments;i++){
-      const dx = Math.cos(angle) * (riverSegmentLength * (0.7 + Math.random()*0.6));
-      const dz = Math.sin(angle) * (riverSegmentLength * (0.7 + Math.random()*0.6));
-      x += dx; z += dz;
-      // add small random bend
-      angle += (Math.random()-0.5) * (bend*0.02);
-      pts.push(new THREE.Vector3(x, 0.02, z));
-    }
-    return pts;
-  }
-
-  // Build ribbon geometry along path (strip)
-  function buildRiverMesh(pathPoints, width) {
-    const segments = pathPoints.length;
-    const pos = new Float32Array((segments*2) * 3);
-    const uvs = new Float32Array((segments*2) * 2);
-    const indices = [];
-
-    for (let i=0;i<segments;i++){
-      const p = pathPoints[i];
-      const next = pathPoints[Math.min(i+1, segments-1)];
-      const prev = pathPoints[Math.max(i-1, 0)];
-      // tangent (approx)
-      const t = new THREE.Vector3().subVectors(next, prev).normalize();
-      // perpendicular in XZ plane
-      const left = new THREE.Vector3(-t.z, 0, t.x).normalize();
-      const half = width * (0.5 + (Math.sin(i*0.5)*0.12)); // slight width variation
-      const leftPos = new THREE.Vector3().copy(p).addScaledVector(left, half);
-      const rightPos = new THREE.Vector3().copy(p).addScaledVector(left, -half);
-
-      pos[(i*2+0)*3+0] = leftPos.x; pos[(i*2+0)*3+1] = leftPos.y; pos[(i*2+0)*3+2] = leftPos.z;
-      pos[(i*2+1)*3+0] = rightPos.x; pos[(i*2+1)*3+1] = rightPos.y; pos[(i*2+1)*3+2] = rightPos.z;
-
-      const v = i / (segments-1);
-      uvs[(i*2+0)*2+0] = 0; uvs[(i*2+0)*2+1] = v * 6;
-      uvs[(i*2+1)*2+0] = 1; uvs[(i*2+1)*2+1] = v * 6;
-
-      if (i < segments-1) {
-        const a = i*2, b = i*2+1, c = (i+1)*2, d = (i+1)*2+1;
-        indices.push(a,b,c); indices.push(b,d,c);
-      }
-    }
-
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-    geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
-    geom.setIndex(indices);
-    geom.computeVertexNormals();
-    // Shader material simple animado para simular movimiento del agua
-    const mat = new THREE.ShaderMaterial({
-      uniforms: {
-        time: { value: 0.0 },
-        baseColor: { value: new THREE.Color(0x223b5a) },
-        highlight: { value: new THREE.Color(0x7fb3ff) },
-        opacity: { value: 0.85 }
-      },
-      vertexShader: `
-        varying vec2 vUv;
-        varying vec3 vPos;
-        void main(){
-          vUv = uv;
-          vPos = position;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);
-        }
-      `,
-      fragmentShader: `
-        uniform float time;
-        uniform vec3 baseColor;
-        uniform vec3 highlight;
-        uniform float opacity;
-        varying vec2 vUv;
-        varying vec3 vPos;
-        void main(){
-          float wave = sin(vUv.y * 12.0 + time * 2.0) * 0.08;
-          float stripe = smoothstep(0.0, 0.6, sin(vUv.x * 10.0 + time * 3.0) * 0.5 + 0.5);
-          vec3 col = mix(baseColor, highlight, 0.35 * stripe + 0.25*wave);
-          // darken edges
-          float edge = smoothstep(0.0, 0.12, abs(vUv.x-0.5));
-          col *= (1.0 - 0.25*edge);
-          gl_FragColor = vec4(col, opacity);
-        }
-      `,
-      transparent: true,
-      depthWrite: false,
-      side: THREE.DoubleSide
-    });
-
-    const mesh = new THREE.Mesh(geom, mat);
-    mesh.receiveShadow = false;
-    mesh.renderOrder = 1;
-    return mesh;
-  }
-
-  // Generate several rivers
-  for (let r=0;r<riversCount;r++){
-    // choose a random start near center but not overlapping player
-    const startX = (Math.random()-0.5) * 40;
-    const startZ = (Math.random()-0.5) * 40;
-    const path = randomRiverPath(startX, startZ, 14 + Math.floor(Math.random()*8));
-    const width = 3 + Math.random()*4;
-    const riverMesh = buildRiverMesh(path, width);
-    scene.add(riverMesh);
-    // add a faint dark bank (slightly darker ground) — optional visual
-    // store river mesh to animate
-    if (!window._rivers) window._rivers = [];
-    window._rivers.push(riverMesh);
-  }
-
-  // ---------- Linterna ----------
+  // Linterna y UI (preservadas)
   const flashlight = new THREE.SpotLight(0xfff3d9, 3.0, 22, Math.PI * 0.36, 0.9, 1);
-  flashlight.position.copy(camera.position);
-  flashlight.target.position.set(0, playerHeight, -1);
-  scene.add(flashlight);
-  scene.add(flashlight.target);
-
-  let flashlightOn = true;
-  let currentBattery = batteryLife;
-
-  // UI Hooks
-  const batteryFill = document.getElementById('batteryFill');
-  const batteryText = document.getElementById('batteryText');
-  const batteryNights = document.getElementById('batteryNights');
-  const btnFlash = document.getElementById('btnFlash');
+  scene.add(flashlight); scene.add(flashlight.target);
+  let flashlightOn = true; let currentBattery = batteryLife;
+  const batteryFill = document.getElementById('batteryFill'); const batteryText = document.getElementById('batteryText');
+  const batteryNights = document.getElementById('batteryNights'); const btnFlash = document.getElementById('btnFlash');
   const darkOverlay = document.getElementById('darkOverlay');
-
-  function updateUI(){
-    const pct = Math.max(0, Math.min(1, currentBattery / batteryLife));
-    batteryFill.style.width = `${Math.round(pct*100)}%`;
-    batteryText.textContent = Math.ceil(currentBattery);
-    const nightsLeft = (currentBattery / nightDuration);
-    batteryNights.textContent = nightsLeft.toFixed(1);
-    btnFlash.textContent = `Linterna: ${flashlightOn ? 'ON (F)' : 'OFF (F)'}`;
-    darkOverlay.style.opacity = flashlightOn ? (1 - pct) * 0.95 : 1.0;
-  }
+  function updateUI(){ const pct = Math.max(0, Math.min(1, currentBattery / batteryLife)); batteryFill.style.width = `${Math.round(pct*100)}%`; batteryText.textContent = Math.ceil(currentBattery); const nightsLeft = (currentBattery / nightDuration); batteryNights.textContent = nightsLeft.toFixed(1); btnFlash.textContent = `Linterna: ${flashlightOn ? 'ON (F)' : 'OFF (F)'}`; darkOverlay.style.opacity = flashlightOn ? (1 - pct) * 0.95 : 1.0; }
   updateUI();
+  btnFlash.addEventListener('click', ()=>{ flashlightOn = !flashlightOn; flashlight.visible = flashlightOn && currentBattery > 0; updateUI(); });
+  window.addEventListener('keydown', (e)=>{ if (gameState === 'PLAYING' && e.key.toLowerCase() === 'f') { flashlightOn = !flashlightOn; flashlight.visible = flashlightOn && currentBattery > 0; updateUI(); } });
 
-  btnFlash.addEventListener('click', ()=>{
-    flashlightOn = !flashlightOn;
-    flashlight.visible = flashlightOn && currentBattery > 0;
-    updateUI();
-  });
-  window.addEventListener('keydown', (e)=>{
-    if (e.key.toLowerCase() === 'f') {
-      flashlightOn = !flashlightOn;
-      flashlight.visible = flashlightOn && currentBattery > 0;
-      updateUI();
-    }
-  });
-
-  // Movement state
-  const moveState = { forward:0, right:0, running:false };
-  let yaw = 0, pitch = 0;
-
-  // Joystick
-  const joyBase = document.getElementById('joyBase');
+  // Controls (preservados)
+  const moveState = { forward:0, right:0, running:false }; let yaw = 0, pitch = 0;
   const joyKnob = document.getElementById('joyKnob');
   const joy = { active:false, id:null, startX:0, startY:0, dx:0, dy:0 };
-  function joyStart(touch){
-    joy.active = true; joy.id = touch.identifier; joy.startX = touch.clientX; joy.startY = touch.clientY; joy.dx = 0; joy.dy = 0;
-  }
-  function joyMove(touch) {
-    const max = 46;
-    const dx = touch.clientX - joy.startX;
-    const dy = touch.clientY - joy.startY;
-    const dist = Math.sqrt(dx*dx + dy*dy);
-    const clamped = Math.min(max, dist);
-    const nx = dx / (dist||1) * clamped;
-    const ny = dy / (dist||1) * clamped;
-    joy.dx = nx; joy.dy = ny;
-    joyKnob.style.transform = `translate(${nx}px, ${ny}px)`;
-    moveState.forward = -ny / max;
-    moveState.right = nx / max;
-  }
-  function joyEnd() {
-    joy.active = false; joy.id = null; joy.dx = joy.dy = 0; joyKnob.style.transform = `translate(0px, 0px)`; moveState.forward = 0; moveState.right = 0;
-  }
-
-  // Touch handlers
-  window.addEventListener('touchstart', (ev)=>{
-    for (const t of ev.changedTouches) {
-      if (t.clientX < window.innerWidth * 0.5 && !joy.active) {
-        joyStart(t);
-      } else {
-        lookPointer.down = true; lookPointer.id = t.identifier; lookPointer.startX = t.clientX; lookPointer.startY = t.clientY;
-      }
-    }
-  }, {passive:false});
-
-  window.addEventListener('touchmove', (ev)=>{
-    ev.preventDefault();
-    for (const t of ev.changedTouches) {
-      if (joy.active && t.identifier === joy.id) {
-        joyMove(t);
-      } else if (lookPointer.id === t.identifier) {
-        const dx = t.clientX - lookPointer.startX; const dy = t.clientY - lookPointer.startY;
-        lookPointer.startX = t.clientX; lookPointer.startY = t.clientY;
-        yaw -= dx * 0.0022; pitch -= dy * 0.0020; pitch = Math.max(-1.2, Math.min(0.65, pitch));
-      }
-    }
-  }, {passive:false});
-
-  window.addEventListener('touchend', (ev)=>{
-    for (const t of ev.changedTouches) {
-      if (joy.active && t.identifier === joy.id) joyEnd();
-      if (lookPointer.id === t.identifier) { lookPointer.down = false; lookPointer.id = null; }
-    }
-  });
-
-  // Look pointer for mouse
+  function joyStart(touch){ joy.active = true; joy.id = touch.identifier; joy.startX = touch.clientX; joy.startY = touch.clientY; joy.dx = 0; joy.dy = 0; }
+  function joyMove(touch) { const max = 46; const dx = touch.clientX - joy.startX; const dy = touch.clientY - joy.startY; const dist = Math.sqrt(dx*dx + dy*dy); const clamped = Math.min(max, dist); const nx = dx / (dist||1) * clamped; const ny = dy / (dist||1) * clamped; joy.dx = nx; joy.dy = ny; joyKnob.style.transform = `translate(${nx}px, ${ny}px)`; moveState.forward = -ny / max; moveState.right = nx / max; }
+  function joyEnd() { joy.active = false; joy.id = null; joy.dx = joy.dy = 0; joyKnob.style.transform = `translate(0px, 0px)`; moveState.forward = 0; moveState.right = 0; }
   const lookPointer = { down:false, id:null, startX:0, startY:0 };
-  window.addEventListener('mousedown', (e)=>{
-    if (e.clientX > window.innerWidth * 0.45) {
-      lookPointer.down = true; lookPointer.startX = e.clientX; lookPointer.startY = e.clientY;
-    }
-  });
-  window.addEventListener('mousemove', (e)=>{
-    if (lookPointer.down) {
-      const dx = e.clientX - lookPointer.startX; const dy = e.clientY - lookPointer.startY;
-      lookPointer.startX = e.clientX; lookPointer.startY = e.clientY;
-      yaw -= dx * 0.0022; pitch -= dy * 0.0020; pitch = Math.max(-1.2, Math.min(0.65, pitch));
-    }
-  });
-  window.addEventListener('mouseup', ()=>{ lookPointer.down = false; });
-
-  // Pointer lock for desktop immersion
-  canvas.addEventListener('click', ()=> {
-    if (document.pointerLockElement !== canvas && !isMobile()) {
-      canvas.requestPointerLock?.();
-    }
-  });
-  document.addEventListener('pointerlockchange', ()=>{
-    if (document.pointerLockElement === canvas) {
-      document.addEventListener('mousemove', onPointerMove);
-    } else {
-      document.removeEventListener('mousemove', onPointerMove);
-    }
-  });
-  function onPointerMove(e){
-    yaw -= e.movementX * 0.0022; pitch -= e.movementY * 0.0020; pitch = Math.max(-1.2, Math.min(0.65, pitch));
-  }
-
-  // Desktop keyboard movement (only when NOT mobile)
-  const keys = {};
-  window.addEventListener('keydown', (e)=>{ keys[e.key.toLowerCase()] = true; });
-  window.addEventListener('keyup', (e)=>{ keys[e.key.toLowerCase()] = false; });
-
-  function applyKeyboard() {
-    if (isMobile()) return;
-    moveState.forward = 0; moveState.right = 0; moveState.running = false;
-    if (keys['w'] || keys['arrowup']) moveState.forward = 1;
-    if (keys['s'] || keys['arrowdown']) moveState.forward = -1;
-    if (keys['a'] || keys['arrowleft']) moveState.right = -1;
-    if (keys['d'] || keys['arrowright']) moveState.right = 1;
-    if (keys['shift']) moveState.running = true;
-  }
-
-  // Collision
-  function collide(position) {
-    for (const c of treeCollisionSpheres) {
-      const dist = Math.hypot(position.x - c.pos.x, position.z - c.pos.z);
-      if (dist < (c.r + 0.34)) return true;
-    }
-    return false;
-  }
+  window.addEventListener('touchstart', (ev)=>{if(gameState !== 'PLAYING') return; for (const t of ev.changedTouches) { if (t.clientX < window.innerWidth * 0.5 && !joy.active) { joyStart(t); } else { lookPointer.down = true; lookPointer.id = t.identifier; lookPointer.startX = t.clientX; lookPointer.startY = t.clientY; } } }, {passive:false});
+  window.addEventListener('touchmove', (ev)=>{if(gameState !== 'PLAYING') return; ev.preventDefault(); for (const t of ev.changedTouches) { if (joy.active && t.identifier === joy.id) { joyMove(t); } else if (lookPointer.id === t.identifier) { const dx = t.clientX - lookPointer.startX; const dy = t.clientY - lookPointer.startY; lookPointer.startX = t.clientX; lookPointer.startY = t.clientY; yaw -= dx * 0.0022; pitch -= dy * 0.0020; pitch = Math.max(-1.2, Math.min(0.65, pitch)); } } }, {passive:false});
+  window.addEventListener('touchend', (ev)=>{if(gameState !== 'PLAYING') return; for (const t of ev.changedTouches) { if (joy.active && t.identifier === joy.id) joyEnd(); if (lookPointer.id === t.identifier) { lookPointer.down = false; lookPointer.id = null; } } });
+  window.addEventListener('mousedown', (e)=>{if(gameState !== 'PLAYING') return; if (e.clientX > window.innerWidth * 0.45) { lookPointer.down = true; lookPointer.startX = e.clientX; lookPointer.startY = e.clientY; } });
+  window.addEventListener('mousemove', (e)=>{if(gameState !== 'PLAYING' || document.pointerLockElement !== canvas) return; if (lookPointer.down) { const dx = e.clientX - lookPointer.startX; const dy = e.clientY - lookPointer.startY; lookPointer.startX = e.clientX; lookPointer.startY = e.clientY; yaw -= dx * 0.0022; pitch -= dy * 0.0020; pitch = Math.max(-1.2, Math.min(0.65, pitch)); } });
+  window.addEventListener('mouseup', ()=>{if(gameState !== 'PLAYING') return; lookPointer.down = false; });
+  canvas.addEventListener('click', ()=> { if (gameState === 'PLAYING' && document.pointerLockElement !== canvas && !isMobile()) { canvas.requestPointerLock?.(); } });
+  function onPointerMove(e){ yaw -= e.movementX * 0.0022; pitch -= e.movementY * 0.0020; pitch = Math.max(-1.2, Math.min(0.65, pitch)); }
+  document.addEventListener('pointerlockchange', ()=>{ if (document.pointerLockElement === canvas) { document.addEventListener('mousemove', onPointerMove); } else { document.removeEventListener('mousemove', onPointerMove); } });
+  const keys = {}; window.addEventListener('keydown', (e)=>{ keys[e.key.toLowerCase()] = true; }); window.addEventListener('keyup', (e)=>{ keys[e.key.toLowerCase()] = false; });
+  function applyKeyboard() { if (isMobile() || gameState !== 'PLAYING') return; moveState.forward = 0; moveState.right = 0; moveState.running = false; if (keys['w'] || keys['arrowup']) moveState.forward = 1; if (keys['s'] || keys['arrowdown']) moveState.forward = -1; if (keys['a'] || keys['arrowleft']) moveState.right = -1; if (keys['d'] || keys['arrowright']) moveState.right = 1; if (keys['shift']) moveState.running = true; }
+  function collide(position) { for (const c of treeCollisionSpheres) { const dist = Math.hypot(position.x - c.pos.x, position.z - c.pos.z); if (dist < (c.r + 0.34)) return true; } return false; }
 
   const clock = new THREE.Clock();
-  let elapsedNight = 0;
+  let shockInterval;
 
-  // Animate loop
-  function animate() {
-    const dt = Math.min(0.05, clock.getDelta());
-    applyKeyboard();
+  // Intro path (drone)
+  const introPath = [
+    { pos: new THREE.Vector3(0, 80, 50), lookAt: new THREE.Vector3(0, 0, 0) },
+    { pos: new THREE.Vector3(40, 40, -10), lookAt: new THREE.Vector3(0, 5, -50) },
+    { pos: new THREE.Vector3(20, 10, -60), lookAt: sirenHead.position.clone().setY(10) },
+    { pos: new THREE.Vector3(-15, 5, -80), lookAt: sirenHead.position.clone().setY(15) }
+  ];
 
-    // animate rivers shader time
-    const t = clock.elapsedTime;
-    if (window._rivers) for (const r of window._rivers){
-      if (r.material && r.material.uniforms && r.material.uniforms.time) r.material.uniforms.time.value = t;
+  function easeInOut(t){ return t<0.5 ? 2*t*t : -1 + (4-2*t)*t; }
+
+  function updateIntro() {
+    const elapsed = Math.min(introDuration, clock.getElapsedTime());
+    const progressRaw = Math.min(1.0, elapsed / introDuration);
+    const progress = easeInOut(progressRaw);
+    const segmentCount = introPath.length - 1;
+    const segmentProgress = progress * segmentCount;
+    const currentSegment = Math.floor(segmentProgress);
+    const segmentLerp = segmentProgress - currentSegment;
+
+    if (currentSegment < segmentCount) {
+        const start = introPath[currentSegment];
+        const end = introPath[currentSegment + 1];
+        droneCam.position.lerpVectors(start.pos, end.pos, segmentLerp);
+        const lookAtTarget = new THREE.Vector3().lerpVectors(start.lookAt, end.lookAt, segmentLerp);
+        droneCam.lookAt(lookAtTarget);
+        activeCamera = droneCam;
     }
 
-    // battery drains while flashlight is on
-    if (flashlightOn && currentBattery > 0) {
-      currentBattery = Math.max(0, currentBattery - dt);
-      if (currentBattery <= 0) { flashlight.visible = false; flashlightOn = false; }
-      updateUI();
+    if (progressRaw >= 1.0 && gameState === 'INTRO') {
+      gameState = 'FINALE';
+      runFinaleSequence().catch(err => { console.error(err); finalizeToPlay(); });
     }
-
-    // movement
-    let forward = moveState.forward;
-    let right = moveState.right;
-    const spd = (moveState.running ? runSpeed : moveSpeed);
-    const dir = new THREE.Vector3();
-    dir.x = Math.sin(yaw) * forward + Math.cos(yaw) * right;
-    dir.z = -Math.cos(yaw) * forward + Math.sin(yaw) * right;
-    if (dir.lengthSq() > 1) dir.normalize();
-    const newPos = camera.position.clone();
-    newPos.x += dir.x * spd * dt;
-    newPos.z += dir.z * spd * dt;
-    if (!collide(newPos)) camera.position.copy(newPos);
-    camera.position.y = playerHeight;
-
-    camera.rotation.order = "YXZ";
-    camera.rotation.y = yaw;
-    camera.rotation.x = pitch;
-
-    // flashlight follow
-    flashlight.position.copy(camera.position);
-    const aim = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).add(camera.position);
-    flashlight.target.position.copy(aim);
-
-    // fog intensifies when battery low
-    const pct = Math.max(0, Math.min(1, currentBattery / batteryLife));
-    scene.fog.density = 0.010 + (1 - pct) * 0.028;
-
-    renderer.render(scene, camera);
-    elapsedNight += dt;
-    requestAnimationFrame(animate);
   }
-  animate();
 
-  // Utils
+  // -------------------------
+  // Cinemática final (con controlador de música)
+  // -------------------------
+  let rocket = null, planet = null;
+  const activeMeteors = [];
+
+  function animateGeneric(duration, onUpdate, easing=(t=>t)){
+    return new Promise(resolve=>{
+      const start = performance.now();
+      function frame(now){
+        const tRaw = Math.min(1, (now - start) / duration);
+        const t = easing(tRaw);
+        onUpdate(t, tRaw);
+        if (tRaw < 1) requestAnimationFrame(frame);
+        else resolve();
+      }
+      requestAnimationFrame(frame);
+    });
+  }
+  function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+  function createRocket(){
+    const g = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.9,0.9,6,12), new THREE.MeshStandardMaterial({ color:0xffffff, roughness:0.3 }));
+    body.position.y = 3; body.castShadow = true;
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.9,1.8,12), new THREE.MeshStandardMaterial({ color:0x111111, roughness:0.6 }));
+    nose.position.y = 6.2; nose.castShadow = true;
+    g.add(body, nose);
+    return g;
+  }
+
+  function createPlanet(radius=18, color=0x222222){
+    const mat = new THREE.MeshStandardMaterial({ color, roughness:0.9, metalness:0.02 });
+    const p = new THREE.Mesh(new THREE.SphereGeometry(radius, 32, 24), mat);
+    return p;
+  }
+
+  function spawnExplosionParticles(pos, count=60, color=0xffaa66, speedBase=80){
+    const group = new THREE.Group();
+    group.position.copy(pos);
+    scene.add(group);
+    for (let i=0;i<count;i++){
+      const s = 0.2 + Math.random()*1.2;
+      const mat = new THREE.MeshStandardMaterial({ color, emissive:color, emissiveIntensity:0.7, roughness:0.6 });
+      const m = new THREE.Mesh(new THREE.SphereGeometry(s, 8, 6), mat);
+      m.position.set(0,0,0);
+      const dir = new THREE.Vector3((Math.random()-0.5),(Math.random()*0.9),(Math.random()-0.5)).normalize();
+      const speed = speedBase*(0.5 + Math.random()*1.2);
+      group.add(m);
+      (async function animatePart(){
+        const t0 = performance.now();
+        const life = 800 + Math.random()*900;
+        while(true){
+          const t = (performance.now()-t0)/life;
+          if (t >= 1){ if (m.parent) group.remove(m); break; }
+          m.position.copy(dir).multiplyScalar(speed * t * 0.01);
+          m.material.opacity = 1 - t;
+          m.material.transparent = true;
+          await new Promise(r=>requestAnimationFrame(r));
+        }
+      })();
+    }
+    (async ()=>{ await sleep(2000); if (group.parent) scene.remove(group); })();
+  }
+
+  function spawnPlanetFragments(center, count=30){
+    for (let i=0;i<count;i++){
+      const s = 1.4 + Math.random()*3.0;
+      const mat = new THREE.MeshStandardMaterial({ color:0xffcc99, emissive:0xff7744, emissiveIntensity:0.6, roughness:0.6 });
+      const frag = new THREE.Mesh(new THREE.IcosahedronGeometry(s,0), mat);
+      frag.position.copy(center);
+      scene.add(frag);
+      const dir = new THREE.Vector3((Math.random()-0.5),(Math.random()-0.2),(Math.random()-0.5)).normalize();
+      const vel = 60 + Math.random()*140;
+      (async ()=>{
+        const t0 = performance.now(); const life = 1600 + Math.random()*1200;
+        while(true){
+          const t = (performance.now()-t0)/life;
+          if (t > 1){ if (frag.parent) scene.remove(frag); break; }
+          frag.position.addScaledVector(dir, vel * 0.001 * (1 + t*2));
+          frag.rotation.x += 0.03; frag.rotation.y += 0.02;
+          frag.material.opacity = 1 - t; frag.material.transparent = true;
+          await new Promise(r=>requestAnimationFrame(r));
+        }
+      })();
+    }
+  }
+
+  function spawnMeteor(startPos, targetPos, speed=140, size=1.6){
+    const mat = new THREE.MeshStandardMaterial({ color:0x553322, roughness:0.92 });
+    const rock = new THREE.Mesh(new THREE.IcosahedronGeometry(size, 0), mat);
+    rock.position.copy(startPos);
+    rock.castShadow = true;
+    const dir = new THREE.Vector3().subVectors(targetPos, startPos).normalize();
+    rock.userData = { dir, vel: speed*(0.95+Math.random()*0.4), target: targetPos.clone(), spawn: performance.now(), life: 8000 };
+    scene.add(rock);
+    activeMeteors.push(rock);
+    return rock;
+  }
+
+  function updateMeteors(dtMs){
+    for (let i = activeMeteors.length - 1; i >= 0; i--){
+      const m = activeMeteors[i];
+      const ud = m.userData;
+      const step = ud.dir.clone().multiplyScalar(ud.vel * dtMs * 0.001);
+      m.position.add(step);
+      m.rotation.x += 0.02; m.rotation.y += 0.04;
+      if (m.position.y <= ud.target.y + 0.2 || (performance.now() - ud.spawn) > ud.life){
+        spawnExplosionParticles(m.position.clone(), 40, 0xff9944, 100);
+        flashAt(m.position, 0xffbb88, 1.2);
+        if (m.parent) scene.remove(m);
+        activeMeteors.splice(i,1);
+      }
+    }
+  }
+
+  function flashAt(pos, color=0xffcc88, intensity=1.2){
+    const l = new THREE.PointLight(color, intensity, 220, 2);
+    l.position.copy(pos).y += 2;
+    scene.add(l);
+    const start = performance.now();
+    (function animateLight(){
+      const t = (performance.now()-start) / 700;
+      if (t > 1){ if (l.parent) scene.remove(l); return; }
+      l.intensity = intensity * (1 - t);
+      requestAnimationFrame(animateLight);
+    })();
+  }
+
+  function safeRemove(obj){ try{ if (obj && obj.parent) obj.parent.remove(obj); } catch(e){} }
+
+  function quakeScene(ms){
+    return new Promise(resolve=>{
+      const start = performance.now();
+      const orig = activeCamera.position.clone();
+      (function frame(now){
+        const t = (now - start) / ms;
+        if (t >= 1){ activeCamera.position.copy(orig); resolve(); return; }
+        const intensity = (1 - t) * 12;
+        activeCamera.position.x = orig.x + (Math.random()-0.5)*intensity;
+        activeCamera.position.y = orig.y + (Math.random()-0.5)*(intensity*0.4);
+        activeCamera.position.z = orig.z + (Math.random()-0.5)*intensity;
+        requestAnimationFrame(frame);
+      })();
+    });
+  }
+
+  function animateTreesFall(duration){
+    const arr = [];
+    for (let i=0;i<treeGroup.children.length;i++){
+      if (Math.random() < 0.22) arr.push(treeGroup.children[i]);
+    }
+    return animateGeneric(duration, (t) => {
+      const e = Math.pow(t, 0.7);
+      arr.forEach((tr, idx) => {
+        const delay = (idx % 6) * 0.04;
+        let tt = Math.max(0, Math.min(1, (t - delay) / (1 - delay)));
+        tt = Math.pow(tt, 0.9);
+        tr.rotation.x = tr.rotation.x + tt * (Math.PI*0.6) * (Math.random() > 0.5 ? 1 : -1);
+        tr.position.y = -tt * 0.9;
+      });
+    });
+  }
+
+  // runFinaleSequence: orchestrates finale and music transitions
+  async function runFinaleSequence(){
+    try {
+      // Preparar rocket y planet
+      rocket = createRocket();
+      rocket.position.set(0, 1.6, 20);
+      rocket.visible = true;
+      scene.add(rocket);
+
+      planet = createPlanet(18, 0x222222);
+      planet.position.set(0, 220, -320);
+      scene.add(planet);
+
+      // Aseguramos droneCam activo brevemente
+      activeCamera = droneCam;
+      await sleep(220);
+
+      // Planet closeup
+      activeCamera = planetCam;
+      const planetClosePos = planet.position.clone().add(new THREE.Vector3(0, 0, 48));
+      await animateGeneric(1400, (t)=>{
+        const e = t*t*(3-2*t);
+        planetCam.position.lerpVectors(droneCam.position, planetClosePos, e);
+        planetCam.lookAt(planet.position);
+      });
+
+      // RocketCam and launch
+      activeCamera = rocketCam;
+      rocketCam.position.copy(rocket.position.clone().add(new THREE.Vector3(0,4,18)));
+      rocketCam.lookAt(rocket.position);
+      await sleep(180);
+
+      const rocketStart = rocket.position.clone();
+      const rocketTarget = planet.position.clone();
+      await animateGeneric(2400, (t)=>{
+        const e = 1 - Math.pow(1 - t, 3);
+        const pos = new THREE.Vector3().lerpVectors(rocketStart, rocketTarget, e);
+        pos.y += e * 120 + Math.sin(e * Math.PI * 3) * 6;
+        rocket.position.copy(pos);
+        rocket.rotation.x = -e * 1.1;
+        const desired = pos.clone().add(new THREE.Vector3(0,6,18));
+        rocketCam.position.lerp(desired, 0.18);
+        rocketCam.lookAt(pos);
+      });
+
+      // Planet explosion
+      await sleep(120);
+      await animateGeneric(600, (t)=>{
+        const e = t;
+        planet.scale.setScalar(1 + e * 3.6);
+        if (planet.material) planet.material.emissive = new THREE.Color(0xffaaaa).multiplyScalar(e);
+        renderer.setClearColor(new THREE.Color(0x220000).lerp(new THREE.Color(0x000000), 1 - e));
+      });
+
+      spawnExplosionParticles(planet.position.clone(), 140, 0xffbb66, 80);
+      spawnPlanetFragments(planet.position.clone(), 36);
+      triggerFullScreenFlash(380);
+
+      // Tinteeo rojo y temblor
+      redTint.style.background = 'rgba(120,8,8,0.12)'; redTint.style.opacity = '1';
+      await quakeScene(1400);
+      await animateTreesFall(1000);
+
+      // *** Aquí hacemos la transición musical: crossfade intro -> meteor ***
+      try {
+        // Prepara meteorMedia para reproducir (start/zero vol)
+        meteorMedia.currentTime = 0;
+        meteorMedia.volume = 0.0;
+        await safePlay(meteorMedia);
+        await crossfade(introMedia, meteorMedia, 900);
+      } catch (err) {
+        console.warn('Transición audio falló:', err);
+        try { introMedia.pause(); meteorMedia.play().catch(()=>{}); } catch(e){}
+      }
+
+      // Meteoritos: switch a groundCam
+      activeCamera = groundCam;
+      groundCam.position.set(0, 6, 40);
+      groundCam.lookAt(new THREE.Vector3(0,0,0));
+
+      const meteorCount = 24;
+      for (let i=0;i<meteorCount;i++){
+        const angle = (Math.random()-0.5) * Math.PI * 0.9;
+        const dist = 380 + Math.random() * 120;
+        const start = planet.position.clone().add(new THREE.Vector3(Math.sin(angle)*dist, 40 + Math.random()*120, Math.cos(angle)*dist));
+        const targetX = (Math.random()-0.5) * 140;
+        const targetZ = (Math.random()-0.5) * 140;
+        const target = new THREE.Vector3(targetX, 0.5 + Math.random()*3, targetZ);
+        spawnMeteor(start, target, 120 + Math.random()*160, 1.2 + Math.random()*1.8);
+        await sleep(120);
+      }
+
+      // Dejar impactos
+      await sleep(3000);
+
+      // final quake y fade
+      await quakeScene(900);
+      await animateGeneric(700, (t)=>{
+        const e = 1 - t;
+        redTint.style.opacity = `${e * 0.0}`;
+        renderer.setClearColor(new THREE.Color(0x000000).lerp(new THREE.Color(0x000000), 1 - e));
+      });
+
+      // Limpieza
+      safeRemove(planet);
+      safeRemove(rocket);
+      planet = null; rocket = null;
+      redTint.style.opacity = '0';
+
+      // Pausar audio de meteoros al finalizar la cinemática
+      try { meteorMedia.pause(); meteorMedia.currentTime = 0; } catch(e){}
+      try { introMedia.pause(); introMedia.currentTime = 0; } catch(e){}
+
+      // Finalizar a PLAY
+      finalizeToPlay();
+
+    } catch (err) {
+      console.error('Error finale sequence', err);
+      try { meteorMedia.pause(); introMedia.pause(); } catch(e){}
+      finalizeToPlay();
+    }
+  }
+
+  // full-screen flash helper
+  function triggerFullScreenFlash(duration=220){
+    const f = document.createElement('div');
+    Object.assign(f.style, { position:'absolute', inset:'0', background:'white', opacity: '0.0', zIndex:9999, pointerEvents:'none' });
+    document.body.appendChild(f);
+    f.style.transition = `opacity ${duration/2}ms ease-out`;
+    requestAnimationFrame(()=> f.style.opacity = '0.92');
+    setTimeout(()=> { f.style.opacity = '0'; setTimeout(()=>document.body.removeChild(f), 260); }, duration);
+  }
+
+  // finalizar a PLAYING (mostrar UI y reset cámara)
+  function finalizeToPlay(){
+    gameState = 'PLAYING';
+    gameUiElements.forEach(el => el.style.display = 'flex');
+    document.querySelector('.look-note').style.display = 'block';
+    camera.position.set(0, playerHeight, 0);
+    activeCamera = camera;
+    yaw = 0; pitch = 0;
+    clock.start();
+    shockInterval = setInterval(startShock, shockIntervalMs);
+  }
+
+  // Bucle de render / animación
+  let lastMs = performance.now();
+  function animateLoop(){
+    requestAnimationFrame(animateLoop);
+    const dt = Math.min(0.05, clock.getDelta());
+
+    switch (gameState) {
+      case 'INTRO': updateIntro(); break;
+      case 'FINALE': /* runFinaleSequence() está manejando animaciones */ break;
+      case 'PLAYING':
+        applyKeyboard();
+        const t = clock.getElapsedTime();
+        if (window._rivers) for (const r of window._rivers){ if (r.material?.uniforms?.time) r.material.uniforms.time.value = t; }
+        if (flashlightOn && currentBattery > 0) { currentBattery = Math.max(0, currentBattery - dt); if (currentBattery <= 0) { flashlight.visible = false; flashlightOn = false; } updateUI(); }
+        const spd = (moveState.running ? runSpeed : moveSpeed);
+        const dir = new THREE.Vector3();
+        dir.x = Math.sin(yaw) * moveState.forward + Math.cos(yaw) * moveState.right;
+        dir.z = -Math.cos(yaw) * moveState.forward + Math.sin(yaw) * moveState.right;
+        if (dir.lengthSq() > 1) dir.normalize();
+        const newPos = camera.position.clone();
+        newPos.x += dir.x * spd * dt; newPos.z += dir.z * spd * dt;
+        if (!collide(newPos)) camera.position.copy(newPos);
+        camera.position.y = playerHeight;
+        camera.rotation.order = "YXZ"; camera.rotation.y = yaw; camera.rotation.x = pitch;
+        flashlight.position.copy(camera.position);
+        const aim = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion).add(camera.position);
+        flashlight.target.position.copy(aim);
+        const pct = Math.max(0, Math.min(1, currentBattery / batteryLife));
+        scene.fog.density = 0.010 + (1 - pct) * 0.028;
+        break;
+    }
+
+    // update meteors movement (approx dt ms)
+    const nowMs = performance.now();
+    const dtMs = Math.min(60, nowMs - lastMs);
+    lastMs = nowMs;
+    if (activeMeteors.length > 0) updateMeteors(dtMs);
+
+    renderer.render(scene, activeCamera);
+  }
+
+  // Shock preserved
+  const shockOverlay = document.getElementById('shockOverlay'); const skullEl = document.getElementById('skull'); let shockActive = false;
+  function startShock() { if (shockActive) return; shockActive = true; document.body.classList.add('shock-active'); shockOverlay.style.opacity = '1'; skullEl.style.transform = 'scale(1.8)'; skullEl.style.opacity = '1'; const originalYaw = yaw, originalPitch = pitch; let shakeElapsed = 0; const shakeDur = 0.9; const shake = (dt) => { if (!shockActive) return; shakeElapsed += dt; const factor = Math.max(0, 1 - (shakeElapsed/shakeDur)); yaw = originalYaw + (Math.random()-0.5) * 0.08 * factor; pitch = originalPitch + (Math.random()-0.5) * 0.04 * factor; if (shakeElapsed < shakeDur) requestAnimationFrame(()=>shake(clock.getDelta())); }; shake(0); setTimeout(endShock, shockDurationMs); }
+  function endShock() { shockActive = false; document.body.classList.remove('shock-active'); skullEl.style.transform = 'scale(0.02)'; skullEl.style.opacity = '0'; shockOverlay.style.opacity = '0'; }
+
+  // Loading simulation (preservado)
+  function simulateLoading() {
+    const loadingText = document.getElementById('loading-text');
+    const steps = [{ text: "Inicializando motor 3D...", duration: 1000, progress: 25 },{ text: "Generando terreno...", duration: 1200, progress: 55 },{ text: "Creando el bosque...", duration: 1500, progress: 90 },{ text: "Listo para comenzar", duration: 500, progress: 100 }];
+    let totalTime = 0;
+    steps.forEach(step => {
+      setTimeout(() => {
+        loadingText.textContent = step.text;
+        loadingBarFill.style.width = `${step.progress}%`;
+      }, totalTime);
+      totalTime += step.duration;
+    });
+    setTimeout(() => {
+      startButton.style.display = 'block';
+    }, totalTime);
+  }
+
+  // Start button: arranca intro y reproduce introMedia (user gesture)
+  startButton.addEventListener('click', () => {
+    loadingScreen.classList.add('fade-out');
+    // reproducir introMedia en el primer click (desbloqueo autoplay)
+    safePlay(introMedia).catch(()=>{});
+    setTimeout(() => {
+      loadingScreen.style.display = 'none';
+      gameState = 'INTRO';
+      droneCam.position.copy(introPath[0].pos);
+      droneCam.lookAt(introPath[0].lookAt);
+      activeCamera = droneCam;
+      clock.start();
+    }, 500);
+  });
+
+  // Utilities
   function isMobile(){ return /Mobi|Android/i.test(navigator.userAgent); }
   window.addEventListener('resize', onWindowResize);
-  function onWindowResize(){ camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
-  if (!isMobile()) {
-    document.getElementById('joystick').style.display = 'none';
-    document.getElementById('tip').textContent = 'WASD para mover • Click para bloquear mouse • F linterna';
-  }
+  function onWindowResize(){ camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix(); droneCam.aspect = window.innerWidth / window.innerHeight; droneCam.updateProjectionMatrix(); planetCam.aspect = window.innerWidth / window.innerHeight; planetCam.updateProjectionMatrix(); rocketCam.aspect = window.innerWidth / window.innerHeight; rocketCam.updateProjectionMatrix(); groundCam.aspect = window.innerWidth / window.innerHeight; groundCam.updateProjectionMatrix(); renderer.setSize(window.innerWidth, window.innerHeight); }
+  if (!isMobile()) { document.getElementById('joystick').style.display = 'none'; document.getElementById('tip').textContent = 'WASD para mover • Click para bloquear mouse • F linterna'; }
+  window.__resetBattery = function(seconds = batteryLife) { currentBattery = seconds; flashlight.visible = flashlightOn && currentBattery>0; updateUI(); };
+  window.__triggerShock = startShock;
+  shockOverlay.style.opacity = '0'; skullEl.style.transform = 'scale(0.02)'; skullEl.style.opacity = '0';
 
-  // Debug reseter
-  window.__resetBattery = function(seconds = batteryLife) {
-    currentBattery = seconds; flashlight.visible = flashlightOn && currentBattery>0; updateUI();
+  // Start everything on load
+  window.onload = () => {
+    simulateLoading();
+    animateLoop();
   };
-
-  // ---------- SHOCK (efecto de calavera) ----------
-  const root = document.documentElement;
-  const shockOverlay = document.getElementById('shockOverlay');
-  const skullEl = document.getElementById('skull');
-
-  let shockTimer = null;
-  let shockActive = false;
-
-  function startShock() {
-    if (shockActive) return;
-    shockActive = true;
-    // add class to body to apply grayscale to canvas
-    document.body.classList.add('shock-active');
-    // show overlay (fade in)
-    shockOverlay.style.opacity = '1';
-    // animate skull (CSS handles transform)
-    skullEl.style.transform = 'scale(1.8)';
-    skullEl.style.opacity = '1';
-    // optional: small camera shake by perturbing yaw/pitch briefly
-    const originalYaw = yaw, originalPitch = pitch;
-    let shakeElapsed = 0;
-    const shakeDur = 0.9;
-    const shake = (dt) => {
-      if (!shockActive) return;
-      shakeElapsed += dt;
-      const factor = Math.max(0, 1 - (shakeElapsed/shakeDur));
-      yaw = originalYaw + (Math.random()-0.5) * 0.08 * factor;
-      pitch = originalPitch + (Math.random()-0.5) * 0.04 * factor;
-      if (shakeElapsed < shakeDur) requestAnimationFrame(()=>shake(clock.getDelta()));
-    };
-    shake(0);
-    // schedule endShock
-    setTimeout(endShock, shockDurationMs);
-  }
-
-  function endShock() {
-    shockActive = false;
-    document.body.classList.remove('shock-active');
-    skullEl.style.transform = 'scale(0.02)';
-    skullEl.style.opacity = '0';
-    shockOverlay.style.opacity = '0';
-    // slight delay to fully restore
-    setTimeout(()=>{}, 400);
-  }
-
-  // Start interval
-  let shockInterval = setInterval(() => {
-    startShock();
-  }, shockIntervalMs);
-
-  // allow immediate trigger for testing by calling window.__triggerShock()
-  window.__triggerShock = function(){
-    startShock();
-  };
-
-  // Ensure initial overlay hidden
-  shockOverlay.style.opacity = '0';
-  skullEl.style.transform = 'scale(0.02)';
-  skullEl.style.opacity = '0';
-
   </script>
 </body>
 </html>
